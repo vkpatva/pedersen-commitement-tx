@@ -21,6 +21,14 @@ fn pedersen_commit(value: i64, blinding: i64) -> i64 {
     ((term % MODULUS) + MODULUS) % MODULUS
 }
 
+/// Toy "range proof": only checks that value is non-negative.
+/// In a real system you would use a zero-knowledge range proof (e.g. Bulletproofs)
+/// that proves 0 <= v < 2^n for a commitment C = v*G + r*H WITHOUT revealing v or r.
+/// Here we fake it by just checking v >= 0 (the prover would have to reveal v to us).
+fn range_proof(value: i64) -> bool {
+    value >= 0
+}
+
 fn main() {
     println!("{}", "=".repeat(60));
     println!("CONFIDENTIAL TRANSACTION DEMO (Pedersen Commitments)");
@@ -93,6 +101,20 @@ fn main() {
     }
 
     // ---------------------------------------------------------------------------
+    // STEP 4b: Range proofs (toy: fake range_proof only checks v >= 0)
+    // ---------------------------------------------------------------------------
+    // In real systems: Bulletproofs (or similar) prove 0 <= v < 2^n for a commitment
+    // without revealing v. See comment block below for where Bulletproofs fit in.
+    println!("--- Step 4b: Range proofs (toy: check each value >= 0) ---");
+    let rp_input = range_proof(value_input);
+    let rp_bob = range_proof(value_to_bob);
+    let rp_change = range_proof(value_change);
+    println!("  range_proof(input=10)  => {} (valid)", rp_input);
+    println!("  range_proof(bob=5)    => {} (valid)", rp_bob);
+    println!("  range_proof(change=5) => {} (valid)", rp_change);
+    println!("  All range proofs pass. (In reality, prover never reveals the values.)\n");
+
+    // ---------------------------------------------------------------------------
     // STEP 5: Why amounts stay secret
     // ---------------------------------------------------------------------------
     println!("--- Step 5: Why amounts stay secret ---");
@@ -132,12 +154,28 @@ fn main() {
     println!("  C_input ?= C_bob + C_change  =>  {}", attack_verification_passes);
     println!("\n  Commitment verification PASSES even though 5 units were created from thin air!\n");
 
+    println!("--- Rejecting the attack with a range proof ---");
+    let rp_change_attack = range_proof(value_change_attack);
+    println!("  range_proof(change=-5) => {} (INVALID)", rp_change_attack);
+    println!("  The malicious transaction would be REJECTED because change is negative.\n");
+
     println!("--- Why a range proof is required ---");
     println!("  Pedersen commitments only prove sum(inputs) = sum(outputs).");
     println!("  They do NOT prove that each value is non-negative or bounded.");
     println!("  Without range proofs, anyone could use negative \"change\" to inflate the supply.");
     println!("  A range proof proves (without revealing the amount) that a committed value v");
     println!("  lies in a valid range, e.g. 0 <= v < 2^64. Then negative or huge values are rejected.\n");
+
+    // ---------------------------------------------------------------------------
+    // Where Bulletproofs fit in real systems
+    // ---------------------------------------------------------------------------
+    println!("--- Where Bulletproofs would fit in real systems ---");
+    println!("  In production (e.g. Monero, Mimblewimble):");
+    println!("  - Each input and output commitment comes with a RANGE PROOF.");
+    println!("  - Bulletproofs are short (~700 bytes) and prove 0 <= v < 2^64 for C = v*G + r*H");
+    println!("    without revealing v or r (zero-knowledge).");
+    println!("  - Verifiers check: (1) sum(input commitments) = sum(output commitments),");
+    println!("    (2) each range proof is valid. Then no negative or overflow amounts are possible.\n");
 
     // ---------------------------------------------------------------------------
     // Final message
