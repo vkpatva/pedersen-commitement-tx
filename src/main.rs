@@ -101,6 +101,45 @@ fn main() {
     println!("  Verification only needed the equality C_input = C_bob + C_change.\n");
 
     // ---------------------------------------------------------------------------
+    // DEMO: Negative value attack — why range proofs are required
+    // ---------------------------------------------------------------------------
+    println!("{}", "=".repeat(60));
+    println!("DEMO: How a negative value breaks the system");
+    println!("{}", "=".repeat(60));
+    println!("\n--- Attack: Malicious transaction with negative \"change\" ---");
+    println!("  Attacker has input 10 but wants to send 15 to Bob (creating 5 from nothing).");
+    println!("  They use a NEGATIVE change: value_change = -5.");
+    println!("  Math still balances: 10 = 15 + (-5), so commitment equation holds.\n");
+
+    let value_input_attack = 10i64;
+    let r_input_attack = 99999i64;
+    let value_to_bob_attack = 15i64;  // More than input!
+    let value_change_attack = -5i64;   // Negative "change" = creating value
+
+    let r_bob_attack = 11111i64;
+    let r_change_attack = r_input_attack - r_bob_attack;
+
+    let c_input_attack = pedersen_commit(value_input_attack, r_input_attack);
+    let c_bob_attack = pedersen_commit(value_to_bob_attack, r_bob_attack);
+    let c_change_attack = pedersen_commit(value_change_attack, r_change_attack);
+
+    let sum_outputs_attack = ((c_bob_attack + c_change_attack) % MODULUS + MODULUS) % MODULUS;
+    let attack_verification_passes = c_input_attack == sum_outputs_attack;
+
+    println!("  C_input (10)  = {}", c_input_attack);
+    println!("  C_bob (15)    = {}", c_bob_attack);
+    println!("  C_change (-5) = {}", c_change_attack);
+    println!("  C_input ?= C_bob + C_change  =>  {}", attack_verification_passes);
+    println!("\n  Commitment verification PASSES even though 5 units were created from thin air!\n");
+
+    println!("--- Why a range proof is required ---");
+    println!("  Pedersen commitments only prove sum(inputs) = sum(outputs).");
+    println!("  They do NOT prove that each value is non-negative or bounded.");
+    println!("  Without range proofs, anyone could use negative \"change\" to inflate the supply.");
+    println!("  A range proof proves (without revealing the amount) that a committed value v");
+    println!("  lies in a valid range, e.g. 0 <= v < 2^64. Then negative or huge values are rejected.\n");
+
+    // ---------------------------------------------------------------------------
     // Final message
     // ---------------------------------------------------------------------------
     println!("{}", "=".repeat(60));
