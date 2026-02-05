@@ -21,12 +21,26 @@ fn pedersen_commit(value: i64, blinding: i64) -> i64 {
     ((term % MODULUS) + MODULUS) % MODULUS
 }
 
-/// Toy "range proof": only checks that value is non-negative.
+/// Toy "range proof" semantic check: value is non-negative (used conceptually; display/verify use toy_range_proof_*).
 /// In a real system you would use a zero-knowledge range proof (e.g. Bulletproofs)
 /// that proves 0 <= v < 2^n for a commitment C = v*G + r*H WITHOUT revealing v or r.
-/// Here we fake it by just checking v >= 0 (the prover would have to reveal v to us).
+#[allow(dead_code)]
 fn range_proof(value: i64) -> bool {
     value >= 0
+}
+
+/// Toy "range proof" as a displayable value π (like we display C).
+/// Prover creates π from (value, C). In reality π would be ~700 bytes and bind to C without revealing v.
+/// Here we encode: π = C*2 + valid_bit (valid_bit = 1 if value >= 0 else 0) so we can show π in the demo.
+fn toy_range_proof_create(value: i64, commitment: i64) -> i64 {
+    let valid_bit = if value >= 0 { 1 } else { 0 };
+    commitment * 2 + valid_bit
+}
+
+/// Toy verification: verifier has only (C, π). Checks that π is valid for C (value was in range).
+/// In reality the verifier runs Bulletproof verification equations; here we check π == C*2+1.
+fn toy_range_proof_verify(commitment: i64, proof: i64) -> bool {
+    proof == commitment * 2 + 1
 }
 
 fn main() {
@@ -48,8 +62,10 @@ fn main() {
     let r_input = 12345i64; // Alice's secret blinding factor for the input
 
     let c_input = pedersen_commit(value_input, r_input);
+    let pi_input = toy_range_proof_create(value_input, c_input);
     println!("  Alice's input commitment: C_input = {}*G + {}*H", value_input, r_input);
     println!("  C_input = {}", c_input);
+    println!("  π_input = {}  (toy range proof for this commitment)", pi_input);
     println!("  (The value 10 and blinding 12345 are NEVER sent on the chain.)\n");
 
     // ---------------------------------------------------------------------------
@@ -65,21 +81,23 @@ fn main() {
 
     let c_bob = pedersen_commit(value_to_bob, r_bob);
     let c_change = pedersen_commit(value_change, r_change);
+    let pi_bob = toy_range_proof_create(value_to_bob, c_bob);
+    let pi_change = toy_range_proof_create(value_change, c_change);
 
     println!("  Bob's output:   value = {}, blinding = {}", value_to_bob, r_bob);
-    println!("  C_bob   = {}*G + {}*H = {}", value_to_bob, r_bob, c_bob);
+    println!("  C_bob   = {}*G + {}*H = {}   π_bob   = {}", value_to_bob, r_bob, c_bob, pi_bob);
     println!("  Change: value = {}, blinding = {}", value_change, r_change);
-    println!("  C_change = {}*G + {}*H = {}", value_change, r_change, c_change);
+    println!("  C_change = {}*G + {}*H = {}   π_change = {}", value_change, r_change, c_change, pi_change);
     println!("  (Again, the actual amounts 5 and 5 are never revealed.)\n");
 
     // ---------------------------------------------------------------------------
     // STEP 3: What gets published (only commitments)
     // ---------------------------------------------------------------------------
     println!("--- Step 3: What is published on the ledger ---");
-    println!("  The network only sees these three numbers:");
-    println!("    C_input  = {}", c_input);
-    println!("    C_bob    = {}", c_bob);
-    println!("    C_change = {}", c_change);
+    println!("  The network sees commitments C and range proofs π (no values, no blindings):");
+    println!("    (C_input,  π_input ) = ({}, {})", c_input, pi_input);
+    println!("    (C_bob,    π_bob   ) = ({}, {})", c_bob, pi_bob);
+    println!("    (C_change, π_change) = ({}, {})", c_change, pi_change);
     println!("  No one can recover 10, 5, or 5 from these alone.\n");
 
     // ---------------------------------------------------------------------------
@@ -101,18 +119,19 @@ fn main() {
     }
 
     // ---------------------------------------------------------------------------
-    // STEP 4b: Range proofs (toy: fake range_proof only checks v >= 0)
+    // STEP 4b: Range proofs — create and display π, then verify (C, π) without knowing v
     // ---------------------------------------------------------------------------
     // In real systems: Bulletproofs (or similar) prove 0 <= v < 2^n for a commitment
-    // without revealing v. See comment block below for where Bulletproofs fit in.
-    println!("--- Step 4b: Range proofs (toy: check each value >= 0) ---");
-    let rp_input = range_proof(value_input);
-    let rp_bob = range_proof(value_to_bob);
-    let rp_change = range_proof(value_change);
-    println!("  range_proof(input=10)  => {} (valid)", rp_input);
-    println!("  range_proof(bob=5)    => {} (valid)", rp_bob);
-    println!("  range_proof(change=5) => {} (valid)", rp_change);
-    println!("  All range proofs pass. (In reality, prover never reveals the values.)\n");
+    // without revealing v. Here we display π like we display C.
+    println!("--- Step 4b: Range proofs — create π, then verify (C, π) ---");
+    println!("  Prover created π for each commitment (above). Verifier checks using only (C, π):");
+    let rp_input = toy_range_proof_verify(c_input, pi_input);
+    let rp_bob = toy_range_proof_verify(c_bob, pi_bob);
+    let rp_change = toy_range_proof_verify(c_change, pi_change);
+    println!("  verify(C_input,  π_input ) => {} (valid)", rp_input);
+    println!("  verify(C_bob,    π_bob   ) => {} (valid)", rp_bob);
+    println!("  verify(C_change, π_change) => {} (valid)", rp_change);
+    println!("  All range proofs pass. Verifier never saw the values.\n");
 
     // ---------------------------------------------------------------------------
     // STEP 5: Why amounts stay secret
@@ -148,16 +167,18 @@ fn main() {
     let sum_outputs_attack = ((c_bob_attack + c_change_attack) % MODULUS + MODULUS) % MODULUS;
     let attack_verification_passes = c_input_attack == sum_outputs_attack;
 
+    let pi_change_attack = toy_range_proof_create(value_change_attack, c_change_attack);
     println!("  C_input (10)  = {}", c_input_attack);
     println!("  C_bob (15)    = {}", c_bob_attack);
-    println!("  C_change (-5) = {}", c_change_attack);
+    println!("  C_change (-5) = {}   π_change = {}", c_change_attack, pi_change_attack);
     println!("  C_input ?= C_bob + C_change  =>  {}", attack_verification_passes);
     println!("\n  Commitment verification PASSES even though 5 units were created from thin air!\n");
 
     println!("--- Rejecting the attack with a range proof ---");
-    let rp_change_attack = range_proof(value_change_attack);
-    println!("  range_proof(change=-5) => {} (INVALID)", rp_change_attack);
-    println!("  The malicious transaction would be REJECTED because change is negative.\n");
+    println!("  Verifier checks (C_change, π_change) without knowing the value:");
+    let rp_change_attack = toy_range_proof_verify(c_change_attack, pi_change_attack);
+    println!("  verify(C_change, π_change) => {} (INVALID)", rp_change_attack);
+    println!("  The malicious transaction is REJECTED because π fails verification (value was negative).\n");
 
     println!("--- Why a range proof is required ---");
     println!("  Pedersen commitments only prove sum(inputs) = sum(outputs).");
@@ -167,9 +188,32 @@ fn main() {
     println!("  lies in a valid range, e.g. 0 <= v < 2^64. Then negative or huge values are rejected.\n");
 
     // ---------------------------------------------------------------------------
+    // How a range proof is created and verified (conceptual)
+    // ---------------------------------------------------------------------------
+    println!("--- How a range proof is created (prover side) ---");
+    println!("  Inputs: commitment C = v*G + r*H, and the prover's secret (v, r).");
+    println!("  Goal: prove that 0 <= v < 2^n (e.g. n=64) WITHOUT revealing v or r.");
+    println!("  Idea (e.g. Bulletproofs-style):");
+    println!("    1. Write v in binary: v = b_0 + 2*b_1 + 4*b_2 + ... (each b_i is 0 or 1).");
+    println!("    2. Encode the bits into Pedersen commitments or vectors in a special way.");
+    println!("    3. Use an inner-product argument to prove that the bits are 0/1 and sum to v.");
+    println!("    4. The proof pi is a short string (~700 bytes) that binds to C.");
+    println!("  Output: proof pi. The prover sends (C, pi) to the verifier; v and r stay secret.\n");
+
+    println!("--- How a range proof is verified (verifier side) ---");
+    println!("  Inputs: commitment C and proof pi (and public parameters G, H, range bound 2^n).");
+    println!("  Verifier does NOT know v or r.");
+    println!("  Steps:");
+    println!("    1. Check that pi is well-formed and has the right size/structure.");
+    println!("    2. Run the verification equation(s): combine C, pi, G, H in a fixed formula.");
+    println!("    3. The math works out only if C actually commits to some v in [0, 2^n).");
+    println!("  If all checks pass => \"C commits to a value in range\". If not => reject.");
+    println!("  The verifier never learns v or r, only that the range condition holds.\n");
+
+    // ---------------------------------------------------------------------------
     // Where Bulletproofs fit in real systems
     // ---------------------------------------------------------------------------
-    println!("--- Where Bulletproofs would fit in real systems ---");
+    println!("--- Where Bulletproofs fit in real systems ---");
     println!("  In production (e.g. Monero, Mimblewimble):");
     println!("  - Each input and output commitment comes with a RANGE PROOF.");
     println!("  - Bulletproofs are short (~700 bytes) and prove 0 <= v < 2^64 for C = v*G + r*H");
